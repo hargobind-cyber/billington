@@ -3940,7 +3940,12 @@ RULES:
 4. If TotalArrears is 0 or empty, say "No arrears".
 5. Format amounts as £X.XX. If the agreement is not found or the response contains an error, say so clearly.
 6. Keep the response concise and factual — no caveats.
-7. NEVER include customer name, date of birth, bank account name, bank sort code, bank account number, IBAN, or BIC in your response — these are redacted for data protection.`;
+7. NEVER include customer name, date of birth, bank account name, bank sort code, bank account number, IBAN, or BIC in your response — these are redacted for data protection.
+8. FORMAT FOR SLACK — use Slack mrkdwn, NOT markdown. DO NOT use markdown tables. Instead use bold labels on separate lines like:
+   *AgreementNumber:* A00290868
+   *TotalArrears:* £0.00
+   Use bullet points (•) for lists. Use *bold* for emphasis. Keep it clean and scannable.
+9. The XML CollectionsHistory entries contain a TeamId field (the numeric team ID) — include it when the user asks about team status or team ID. The top-level TeamStatusId is the current status ID.`;
             reply = await askClaude(prompt);
           } catch (err) {
             console.error(`[bill-ling] Anchor API error:`, err.message);
@@ -4573,7 +4578,12 @@ RULES:
 4. If TotalArrears is 0 or empty, say "No arrears".
 5. Format amounts as £X.XX. If the agreement is not found or the response contains an error, say so clearly.
 6. Keep the response concise and factual — no caveats.
-7. NEVER include customer name, date of birth, bank account name, bank sort code, bank account number, IBAN, or BIC in your response — these are redacted for data protection.`;
+7. NEVER include customer name, date of birth, bank account name, bank sort code, bank account number, IBAN, or BIC in your response — these are redacted for data protection.
+8. FORMAT FOR SLACK — use Slack mrkdwn, NOT markdown. DO NOT use markdown tables. Instead use bold labels on separate lines like:
+   *AgreementNumber:* A00290868
+   *TotalArrears:* £0.00
+   Use bullet points (•) for lists. Use *bold* for emphasis. Keep it clean and scannable.
+9. The XML CollectionsHistory entries contain a TeamId field (the numeric team ID) — include it when the user asks about team status or team ID. The top-level TeamStatusId is the current status ID.`;
           const reply = await askClaude(prompt);
           await say({ text: reply, mrkdwn: true });
         } catch (err) {
