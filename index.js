@@ -2902,9 +2902,9 @@ console.log("[bill-ling] BACS file summary cron scheduled for 15:00 Mon-Fri (Eur
 // ---------------------------------------------------------------------------
 // Cron: 4pm Mon-Fri — Refunds summary + thread chasers
 cron.schedule(
-  "0 16 * * 1-5",
+  "0 8 * * 1-5",
   async () => {
-    console.log("[bill-ling] Running 4pm refunds cron...");
+    console.log("[bill-ling] Running 8am refunds cron...");
     try {
       const { summary, data } = await getRefundsSummary();
       await app.client.chat.postMessage({
@@ -2916,9 +2916,9 @@ cron.schedule(
         unfurl_media: false,
       });
       await postRefundChasers(data);
-      console.log("[bill-ling] 4pm refunds cron complete.");
+      console.log("[bill-ling] 8am refunds cron complete.");
     } catch (err) {
-      console.error("[bill-ling] 4pm refunds cron error:", err.message);
+      console.error("[bill-ling] 8am refunds cron error:", err.message);
     }
   },
   { timezone: "Europe/London" }
