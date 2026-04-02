@@ -3941,10 +3941,15 @@ RULES:
 5. Format amounts as £X.XX. If the agreement is not found or the response contains an error, say so clearly.
 6. Keep the response concise and factual — no caveats.
 7. NEVER include customer name, date of birth, bank account name, bank sort code, bank account number, IBAN, or BIC in your response — these are redacted for data protection.
-8. FORMAT FOR SLACK — use Slack mrkdwn, NOT markdown. DO NOT use markdown tables. Instead use bold labels on separate lines like:
-   *AgreementNumber:* A00290868
-   *TotalArrears:* £0.00
-   Use bullet points (•) for lists. Use *bold* for emphasis. Keep it clean and scannable.
+8. CRITICAL FORMATTING — you are posting to Slack which uses mrkdwn, NOT markdown.
+   FORBIDDEN: **bold**, | tables |, markdown headers (## etc).
+   REQUIRED: *bold* (single asterisk), bullet points (•), plain line breaks.
+   Example of CORRECT format:
+   *A00290868*
+   • *TeamStatusId:* 519
+   • *TeamStatus:* Deceased Customers - Confirmed
+   • *Moved to status:* 10 Mar 2026 at 16:55 by T.Byrne
+   • *Previous status:* 103. Due in 30 - 6 days
 9. The XML CollectionsHistory entries contain a TeamId field (the numeric team ID) — include it when the user asks about team status or team ID. The top-level TeamStatusId is the current status ID.`;
             reply = await askClaude(prompt);
           } catch (err) {
@@ -4579,10 +4584,15 @@ RULES:
 5. Format amounts as £X.XX. If the agreement is not found or the response contains an error, say so clearly.
 6. Keep the response concise and factual — no caveats.
 7. NEVER include customer name, date of birth, bank account name, bank sort code, bank account number, IBAN, or BIC in your response — these are redacted for data protection.
-8. FORMAT FOR SLACK — use Slack mrkdwn, NOT markdown. DO NOT use markdown tables. Instead use bold labels on separate lines like:
-   *AgreementNumber:* A00290868
-   *TotalArrears:* £0.00
-   Use bullet points (•) for lists. Use *bold* for emphasis. Keep it clean and scannable.
+8. CRITICAL FORMATTING — you are posting to Slack which uses mrkdwn, NOT markdown.
+   FORBIDDEN: **bold**, | tables |, markdown headers (## etc).
+   REQUIRED: *bold* (single asterisk), bullet points (•), plain line breaks.
+   Example of CORRECT format:
+   *A00290868*
+   • *TeamStatusId:* 519
+   • *TeamStatus:* Deceased Customers - Confirmed
+   • *Moved to status:* 10 Mar 2026 at 16:55 by T.Byrne
+   • *Previous status:* 103. Due in 30 - 6 days
 9. The XML CollectionsHistory entries contain a TeamId field (the numeric team ID) — include it when the user asks about team status or team ID. The top-level TeamStatusId is the current status ID.`;
           const reply = await askClaude(prompt);
           await say({ text: reply, mrkdwn: true });
