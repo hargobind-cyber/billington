@@ -1,0 +1,22 @@
+# Secrets — never commit these
+.env
+raylo-service-account.json
+
+# Dependencies
+node_modules/
+
+# PM2 logs
+*.log
+.pm2/
+
+# Mac junk
+.DS_Store
+
+# Knowledge files with personal instructions (back these up separately)
+knowledge/hargo-instructions.txt
+
+# Runtime state (ephemeral on cloud deploys)
+reminders.json
+
+# Generated GCP service account file (written from env var at startup)
+gcp-sa.json

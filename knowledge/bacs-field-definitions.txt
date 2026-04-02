@@ -1,0 +1,87 @@
+# BACS Monitoring Field Definitions
+# Table: raylo-production.landing_billington.bacs_monitoring
+
+Each row = one due_date (a BACS payment processing date).
+All _amount fields are in £ (decimal). Do NOT divide by 100. e.g. 169895.53 = £169,895.53.
+
+---
+PROCESSES YOU SHOULD UNDERSTAND:
+- BACS = Bankers' Automated Clearing Services — the UK payment rail Raylo uses for direct debits
+- AUDDIS = Automated Direct Debit Instruction Service — used to set up or cancel DD mandates with a customer's bank
+- ARUDD = Automated Return of Unpaid Direct Debits — the notification received when a DD bounces/fails (maps to bounced_count fields)
+- Recollection = a retry DD raised after an ARUDD bounce (maps to recollection_* fields)
+- GoCardless (GC) = the payment gateway Raylo uses to submit BACS files; DDs pass through GC before reaching BACS
+
+When someone asks about "ARUDD figures", "bounces", "failed DDs", or "returned DDs" → use instalment_direct_debits_bounced_count / bounced_amount.
+When someone asks about "recollections", "retries", "re-presented DDs", or "retry DDs" → use recollection_direct_debits_* fields.
+When someone asks about "AUDDIS" → this relates to mandate setup/cancellation, not tracked in this table directly, but context is useful.
+
+---
+## Date & Batch
+due_date: The instalment due date the batch relates to. Also: payment date, collection date, EOM date.
+batch_created_at: When the payment batch was generated in Aryza/Anchor. Also: batch generation time, file creation timestamp. Use this to answer "was a collection file generated today?"
+
+## Instalment Volume
+total_instalments_due: Total number of instalments falling due on this date. Also: expected collections, scheduled payments.
+instalment_profiles_due_after_30d: Instalment payment profiles whose due date is more than 30 days away. Also: future-dated profiles, long-horizon instalments.
+
+## Instalment Direct Debits
+instalment_direct_debits_called_for_count: Count of instalment DDs requested/scheduled in Anchor. Also: presented DDs, DDs raised, DDs submitted, called for.
+instalment_direct_debits_called_for_amount: Total value of instalment DD requests (pence). Also: amount presented, submitted value, called-for amount.
+instalment_direct_debits_posted_count: Count of instalment DDs that successfully posted to the customer account. Also: collected DDs, applied, settled DDs.
+instalment_direct_debits_posted_amount: Value of successfully posted instalment DDs (pence). Also: collected amount, settled value.
+instalment_direct_debits_bounced_count: Count of instalment DDs that bounced/failed after presentation (ARUDD). Also: failed DDs, returned DDs, ARUDD count, bounces.
+instalment_direct_debits_bounced_amount: Value of bounced instalment DDs (pence). Also: failed amount, returned value, ARUDD value.
+instalment_direct_debits_in_batch_count: Count of instalment DDs included in the BACS payment file sent to GoCardless. Also: in file, submitted to BACS, batched.
+instalment_direct_debits_in_batch_amount: Value of instalment DDs in the BACS file (pence). Also: batch value, file amount.
+instalment_direct_debits_failed_gc_count: Count of instalment DDs rejected by GoCardless before BACS submission. Also: GC rejected, pre-submission failures.
+instalment_direct_debits_confirmed_gc_count: Count confirmed by GoCardless as successfully submitted to BACS. Also: GC confirmed, BACS accepted.
+instalment_direct_debits_in_flight_gc_count: Count still pending a final status from GoCardless. Also: pending DDs, unresolved, awaiting confirmation.
+
+## Recollection Direct Debits (retries after a bounce)
+recollection_direct_debits_called_for_count: Count of recollection DDs raised (retries after ARUDD). Also: retry DDs, re-presented DDs, ARUDD retries, recollections raised.
+recollection_direct_debits_called_for_amount: Value of recollection DDs raised (pence). Also: retry amount.
+recollection_direct_debits_posted_count: Recollection DDs that successfully posted. Also: recovered payments, successful retries.
+recollection_direct_debits_posted_amount: Value recovered via recollection (pence). Also: recovered amount.
+recollection_direct_debits_bounced_count: Recollection DDs that bounced again (second ARUDD). Also: failed retries, second bounce, repeat ARUDD.
+recollection_direct_debits_bounced_amount: Value of failed recollection attempts (pence). Also: retry failure value.
+recollection_direct_debits_in_batch_count: Recollection DDs included in a BACS file. Also: retries in file, re-presented in batch.
+recollection_direct_debits_in_batch_amount: Value of recollection DDs in file (pence). Also: retry batch value.
+recollection_direct_debits_failed_gc_count: Recollection DDs rejected by GoCardless. Also: GC-rejected retries.
+recollection_direct_debits_confirmed_gc_count: Recollection DDs confirmed by GoCardless. Also: GC-accepted retries.
+recollection_direct_debits_in_flight_gc_count: Recollection DDs still awaiting GC status. Also: pending retries, unresolved recollections.
+
+## Repair / Damage Fee Direct Debits
+repair_direct_debits_called_for_count: Count of repair/damage fee DDs raised. Also: damage DDs, fee DDs.
+repair_direct_debits_called_for_amount: Value of repair/damage fee DDs raised (pence). Also: damage fee amount.
+repair_direct_debits_posted_count: Repair DDs that successfully posted. Also: collected repair fees.
+repair_direct_debits_posted_amount: Value of collected repair fees (pence). Also: recovered damage amount.
+repair_direct_debits_bounced_count: Repair DDs that bounced. Also: failed fee DDs, returned damage DDs.
+repair_direct_debits_bounced_amount: Value of bounced repair DDs (pence). Also: uncollected repair fees.
+repair_direct_debits_in_batch_count: Repair DDs in the BACS file. Also: fee DDs in batch.
+repair_direct_debits_in_batch_amount: Value of repair DDs in file (pence). Also: fee batch amount.
+repair_direct_debits_failed_gc_count: Repair DDs rejected by GoCardless. Also: GC-rejected fee DDs.
+repair_direct_debits_confirmed_gc_count: Repair DDs confirmed by GoCardless. Also: GC-accepted fee DDs.
+repair_direct_debits_in_flight_gc_count: Repair DDs awaiting GC status. Also: pending fee DDs.
+damage_fee_profiles_due_after_30d: Repair/damage fee profiles not due for more than 30 days. Also: future damage fee profiles.
+
+## GoCardless Aggregate Totals
+total_failed_go_cardless: Total DDs across all types rejected by GoCardless. Also: total GC failures, total pre-BACS rejections.
+total_in_flight_go_cardless: Total DDs across all types still pending GC status. Also: total pending, total unresolved.
+total_confirmed_go_cardless: Total DDs across all types confirmed by GC. Also: total GC accepted, total submitted to BACS.
+
+## Percentages & Forecasts
+percent_of_instalment_due_called_for: % of total due instalments that have had a DD raised. Also: collection coverage rate, call-for rate.
+percent_of_repair_due_called_for: % of repair/damage fees due that have had a DD raised. Also: fee coverage rate.
+pending_recollection_count: Count of agreements in arrears with bacs_retransmit=TRUE, queued for retry on the next BACS date. Also: pending retries, recollections queued, bacs_retransmit count.
+pending_recollection_amount: Total value of transactions queued for retry (pence). Also: pending retry value, queued recollection amount.
+late_fees_applied: Late payment fees already applied. Also: LPF applied, fees charged.
+estimated_late_fees_to_apply: Late fees expected to be applied based on current bounces. Also: projected LPF, fees in pipeline.
+estimated_direct_debits_called_for: Forward-looking estimate of DDs expected to be raised. Also: projected DD volume, forecast submissions.
+estimated_direct_debits_bounce: Forward-looking estimate of DDs expected to bounce. Also: projected failures, forecast ARUDD.
+
+## Operational Timing
+time_to_create_payment_batch: Time taken from trigger to batch being created in Anchor. Also: batch generation time, Anchor processing time.
+time_to_send_payment_file: Time from batch creation to BACS file being sent to GoCardless. Also: file submission time, BACS dispatch time.
+time_to_apply_fees: Time taken for late fees to be applied after a bounce. Also: fee application lag, LPF processing time.
+time_to_trigger: Time from scheduled trigger point to the process actually starting. Also: trigger lag, job start delay, scheduler delay.

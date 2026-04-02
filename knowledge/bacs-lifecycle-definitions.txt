@@ -1,0 +1,120 @@
+# BACS Payment Lifecycle — Agreement-Level Detail
+# View: raylo-production.landing_billington.bacs_monitoring_agreement_level
+#
+# One row per BACS transmission record, joined across the full payment lifecycle.
+# Use this table when you need to drill down into WHICH specific agreements/payments
+# have issues. Use bacs_monitoring (aggregate) for daily totals and summaries.
+
+---
+WHEN TO USE EACH TABLE:
+- bacs_monitoring → aggregate daily summaries, counts, amounts, timing, forecasts
+- bacs_monitoring_agreement_level → drill down into specific agreements, investigate discrepancies,
+  find which lines have issues, trace individual payment lifecycles
+
+If bacs_monitoring shows a discrepancy (e.g. anchor bounces != GC failures, or posted % < 100%),
+use bacs_monitoring_agreement_level to identify WHICH specific agreements are causing it.
+
+---
+PAYMENT LIFECYCLE (happy path):
+1. BACS transmission — Aryza Lend generates a BACS file entry
+2. Payment services — GoCardless payment object created (linked by bacs_trans_unique_id)
+3. Transaction batch — batch record created for this collection date
+4. GoCardless processing — GC submits to BACS scheme, confirms, pays out
+5. Anchor transaction — payment posted to the loan ledger (creator = AUTOPOSTMON for auto-posts)
+6. If bounced: Reversal transaction posted in Anchor
+
+---
+KEY COLUMNS:
+
+Identifiers:
+- agreement_id (STRING): the agreement, format A00XXXXXX
+- customer_id (STRING): the customer
+- bacs_trans_unique_id (INT64): unique BACS transmission ID
+- gc_payment_id (STRING): GoCardless payment ID
+- gc_mandate_id (STRING): GoCardless mandate ID
+- anchor_transaction_id (INT64): Anchor ledger transaction ID
+- anchor_reversal_id (INT64): Anchor reversal transaction ID (if bounced)
+- transaction_batch_id (INT64): batch this transmission belongs to
+- bacs_profile_id (INT64): payment profile ID
+
+BACS Transmission (Step 1):
+- bacs_date (DATE): scheduled BACS collection date
+- bacs_amount (DECIMAL): amount in GBP (already rounded to 2dp)
+- bacs_trans_code (STRING): BACS transaction code
+- bacs_is_recollect (BOOL): TRUE = retry for previously bounced DD, FALSE = original collection
+- bacs_error_desc (STRING): error description if BACS transmission had an error
+- payment_profile_subtype (STRING): NULL = regular instalment, 'Damage Fee' = repair/damage charge
+
+Payment Services (Step 2):
+- ps_created_by (STRING): who created the GC payment
+- ps_created_date (DATE): when the GC payment was created
+
+Transaction Batch (Step 2b):
+- batch_number (STRING): batch identifier
+- batch_date (DATE): batch collection date
+- batch_creator (STRING): who created the batch
+- batch_created_date (DATE): when batch was created
+
+GoCardless (Step 3):
+- gc_event_id (STRING): GC event ID
+- gc_latest_action (STRING): most recent GC event status
+- gc_event_cause (STRING): cause of the event (e.g. payment_failed)
+- gc_event_description (STRING): human-readable description
+- gc_event_at (STRING): timestamp of GC event (ISO string)
+
+Anchor Transaction (Step 4):
+- txn_creator (STRING): who posted the transaction (AUTOPOSTMON = auto-posted)
+- txn_posted_date (DATE): when posted to ledger
+- txn_transaction_date (DATE): transaction effective date
+- txn_bacs_retransmit (BOOL): queued for retry
+
+Reversal (Step 5):
+- reversal_creator (STRING): who posted the reversal
+- reversal_posted_date (DATE): when reversal was posted
+- reversal_transaction_date (DATE): reversal effective date
+- reversal_bacs_retransmit (BOOL): reversal queued for retry
+
+Derived:
+- days_since_bacs_date (INT64): days elapsed since scheduled BACS date
+- lifecycle_stage (STRING): pre-computed stage (see below)
+
+---
+LIFECYCLE STAGES (lifecycle_stage column):
+- 1_BACS_ERROR: BACS transmission has an error
+- 2_NO_GC_PAYMENT: no GoCardless payment found
+- 3_NO_BATCH: payment reached GC but no transaction batch exists (and bacs_date has passed)
+- 4_AWAITING_GC: payment services record exists but no GC event
+- 5_GC_IN_FLIGHT: GC status is created or submitted (normal on/near bacs_date)
+- 6_GC_CONFIRMED: GC confirmed the DD
+- 7_SETTLED: GC paid out AND posted in Anchor AND no reversal = fully settled (happy path)
+- 8_GC_PAID_NOT_POSTED: GC paid out but no Anchor transaction (money moved but ledger doesn't reflect it)
+- 9_BOUNCED_REVERSED: GC failed/bounced AND reversal posted in Anchor (cleanly handled)
+- 10_BOUNCED_NOT_REVERSED: GC failed/bounced AND Anchor transaction exists but NO reversal (ledger integrity risk)
+- 11_GC_FAILED_NOT_POSTED: GC failed but was never posted to Anchor in the first place
+- UNKNOWN: doesn't fit any known pattern
+
+---
+ISSUE FLAGS (TRUE = requires investigation):
+- issue_bacs_error: BACS transmission has an error description
+- issue_no_batch: payment reached GC but no transaction batch despite bacs_date having passed
+- issue_missing_from_gc: payment services record exists but no GC event at all
+- issue_gc_stuck_in_flight: GC still showing created/submitted on or after bacs_date
+- issue_gc_failed_no_reversal: GC failed/bounced but no reversal in Anchor (CRITICAL — ledger integrity)
+- issue_gc_paid_not_posted: GC paid out but no Anchor transaction (CRITICAL — unreconciled cash)
+
+ISSUE SEVERITY:
+- Critical: issue_gc_failed_no_reversal, issue_gc_paid_not_posted
+- High: issue_gc_stuck_in_flight WHERE days_since_bacs_date > 3
+- Medium: issue_no_batch, issue_missing_from_gc
+- Low: issue_bacs_error (usually informational), issue_gc_stuck_in_flight WHERE days_since_bacs_date <= 2
+
+---
+DOMAIN RULES:
+- BACS processing takes 3 working days. DD submitted Monday collects Thursday. Do NOT flag 'submitted' as stuck unless days_since_bacs_date > 3.
+- Recollections (bacs_is_recollect = TRUE) are retries for previously bounced DDs. Higher bounce rates on recollections are expected.
+- Transaction type 49 = Late Payment Fee (not a DD, just a ledger entry after a bounce).
+- Reversal transaction types 150-156 are valid bounce/chargeback reversals.
+- AUTOPOSTMON as txn_creator = auto-posted on collection date (normal).
+- GoCardless terminal success: confirmed, paid_out. Terminal failure: failed, cancelled, charged_back, chargeback_settled, late_failure_settled. In-flight: created, submitted.
+- Amounts are in GBP, round to 2 decimal places.
+- Agreement IDs: format A00XXXXXX (A followed by 5 or 8 digits).

@@ -1,0 +1,25 @@
+# bacs_monitoring View Definition
+# Dataset: raylo-production.landing_billington
+# This is a VIEW, not a base table. It reads from source tables in dbt_production.
+
+## Source tables that feed bacs_monitoring:
+- raylo-production.dbt_production.stg_landing_sentinel_s3db01__transactions
+- raylo-production.dbt_production.stg_landing_sentinel_s3db01__payment_profiles
+- raylo-production.dbt_production.stg_landing_sentinel_s3db01__transaction_batches
+- raylo-production.dbt_production.stg_landing_sentinel_s3db01__payment_services_payments
+- raylo-production.dbt_production.intermediate_sentinel_s3db01__bacs_transmissions_table
+- raylo-production.dbt_production.intermediate_gocardless__payment_events
+- raylo-production.dbt_production.core_agreements
+- raylo-production.dbt_production.intermediate_core_transactions
+
+IMPORTANT: When someone asks "when was bacs_monitoring last updated?" or "when were the tables in bacs_monitoring last modified?", the answer should come from checking the last_modified time of the SOURCE TABLES above — NOT the view itself. The view is just a SQL definition; its freshness depends entirely on the source tables.
+
+## What each source table contains:
+- stg_landing_sentinel_s3db01__transactions: all financial transactions (instalments, reversals, LPF, etc.)
+- stg_landing_sentinel_s3db01__payment_profiles: scheduled payment profiles (due dates, types Pay/Sec)
+- stg_landing_sentinel_s3db01__transaction_batches: BACS transaction batches (batch dates, creation times)
+- stg_landing_sentinel_s3db01__payment_services_payments: BACS payment service records (payment_id, mandate, bacs amounts)
+- intermediate_sentinel_s3db01__bacs_transmissions_table: BACS transmission details
+- intermediate_gocardless__payment_events: GoCardless payment events (deduped to latest per payment_id)
+- core_agreements: agreement-level data (arrears, bacs_retransmit flag, payment method)
+- intermediate_core_transactions: processed/settled transactions (type 99)
