@@ -899,6 +899,22 @@ function extractReversalsFromXml(xml, agreementId) {
     reversals.map(r => `TypeId ${r.typeId} | £${r.amount} | date ${r.date}`).join("; ");
 }
 
+/**
+ * Strip PII fields from Anchor SOAP XML before passing to Claude.
+ * Removes: customer name, DOB, bank account details (name, sort code, account number, IBAN, BIC).
+ */
+function stripPiiFromXml(xml) {
+  // Remove entire Customers block (contains Name, DateOfBirth, addresses, etc.)
+  xml = xml.replace(/<a:Customers>[\s\S]*?<\/a:Customers>/g, "<a:Customers>[REDACTED]</a:Customers>");
+  // Remove bank details
+  xml = xml.replace(/<a:BankAccountName>[^<]*<\/a:BankAccountName>/g, "<a:BankAccountName>[REDACTED]</a:BankAccountName>");
+  xml = xml.replace(/<a:BankSortCode>[^<]*<\/a:BankSortCode>/g, "<a:BankSortCode>[REDACTED]</a:BankSortCode>");
+  xml = xml.replace(/<a:BankAccountNumber>[^<]*<\/a:BankAccountNumber>/g, "<a:BankAccountNumber>[REDACTED]</a:BankAccountNumber>");
+  xml = xml.replace(/<a:BankIBAN>[^<]*<\/a:BankIBAN>/g, "<a:BankIBAN>[REDACTED]</a:BankIBAN>");
+  xml = xml.replace(/<a:BankBIC>[^<]*<\/a:BankBIC>/g, "<a:BankBIC>[REDACTED]</a:BankBIC>");
+  return xml;
+}
+
 // UK bank holidays — extend as needed
 const UK_BANK_HOLIDAYS = new Set([
   "2026-01-01","2026-04-03","2026-04-06","2026-05-04",
@@ -3906,7 +3922,7 @@ Return ONLY the SQL — no explanation, no markdown, no backtick fences.`;
               xmlResults.push(...batchResults);
             }
             const xmlBlock = xmlResults.map(r =>
-              r.error ? `--- ${r.agId}: ERROR — ${r.error} ---` : `--- ${r.agId} ---\n${r.xml}`
+              r.error ? `--- ${r.agId}: ERROR — ${r.error} ---` : `--- ${r.agId} ---\n${stripPiiFromXml(r.xml)}`
             ).join("\n\n");
             const prompt = `The user asked: "${cleanText}"
 
@@ -3915,15 +3931,16 @@ Here are the raw SOAP XML responses from Anchor for ${agIdMatches.length} agreem
 ${xmlBlock}
 
 The Agreement node contains these fields (all available if the user asks):
-AgreementNumber, AgreementTypeID, Principal, PartExchange, CashDeposit, UpFrontPayments, UpFrontPaymentAmount, BalloonOrResidual, InterestRateUplift, NetInstalment, Interest, AccruedInterest, APR, TotalArrears, Balance, PaymentMethod, CRAArrearsStatus, ACQUISProductCode, Term, InterestOnlyTerm, DueDay, CollectionType, PaymentFrequency, CustomProfile, AgreementDate, FirstPaymentDate, UpfrontPaymentDate, ExternalReference1, ExternalReference2, Purpose, Notes, WarningFlag, TeamStatus, Collector, PersonNumber, WarningText, SalesmanNumber, DealerNumber, SalesAuthority, Branch, Customers, PaymentProfile, Transactions, Goods, CollectionsHistory, CRAFlags, TeamStatusId, ArrearsNET, ArrearsVAT, ArrearsFeeNET, ArrearsFeeVAT, ArrearsIns, ChargesOutstanding, LockedTransactions, AdjustedFinalPayment, BankAccountName, BankSortCode, BankAccountNumber, BankIBAN, BankBIC.
+AgreementNumber, AgreementTypeID, Principal, PartExchange, CashDeposit, UpFrontPayments, UpFrontPaymentAmount, BalloonOrResidual, InterestRateUplift, NetInstalment, Interest, AccruedInterest, APR, TotalArrears, Balance, PaymentMethod, CRAArrearsStatus, ACQUISProductCode, Term, InterestOnlyTerm, DueDay, CollectionType, PaymentFrequency, CustomProfile, AgreementDate, FirstPaymentDate, UpfrontPaymentDate, ExternalReference1, ExternalReference2, Purpose, Notes, WarningFlag, TeamStatus, Collector, PersonNumber, WarningText, SalesmanNumber, DealerNumber, SalesAuthority, Branch, PaymentProfile, Transactions, Goods, CollectionsHistory, CRAFlags, TeamStatusId, ArrearsNET, ArrearsVAT, ArrearsFeeNET, ArrearsFeeVAT, ArrearsIns, ChargesOutstanding, LockedTransactions, AdjustedFinalPayment.
 
 RULES:
 1. By DEFAULT (if the user just says "check agreement" or "check arrears"), show ONLY these key fields: AgreementNumber, TotalArrears, Balance, PaymentMethod, CRAArrearsStatus, NetInstalment, DueDay.
 2. If the user asks for SPECIFIC fields (e.g. "what's the payment frequency", "show me the transactions", "what's the APR"), show ONLY those fields.
-3. If the user asks for "full details" or "everything", show all available fields.
+3. If the user asks for "full details" or "everything", show all available fields EXCEPT the ones listed in rule 7.
 4. If TotalArrears is 0 or empty, say "No arrears".
 5. Format amounts as £X.XX. If the agreement is not found or the response contains an error, say so clearly.
-6. Keep the response concise and factual — no caveats.`;
+6. Keep the response concise and factual — no caveats.
+7. NEVER include customer name, date of birth, bank account name, bank sort code, bank account number, IBAN, or BIC in your response — these are redacted for data protection.`;
             reply = await askClaude(prompt);
           } catch (err) {
             console.error(`[bill-ling] Anchor API error:`, err.message);
@@ -4538,7 +4555,7 @@ Return ONLY the SQL — no explanation, no markdown, no backtick fences.`;
             xmlResults.push(...batchResults);
           }
           const xmlBlock = xmlResults.map(r =>
-            r.error ? `--- ${r.agId}: ERROR — ${r.error} ---` : `--- ${r.agId} ---\n${r.xml}`
+            r.error ? `--- ${r.agId}: ERROR — ${r.error} ---` : `--- ${r.agId} ---\n${stripPiiFromXml(r.xml)}`
           ).join("\n\n");
           const prompt = `The user asked: "${trimmed}"
 
@@ -4547,15 +4564,16 @@ Here are the raw SOAP XML responses from Anchor for ${agIdMatches.length} agreem
 ${xmlBlock}
 
 The Agreement node contains these fields (all available if the user asks):
-AgreementNumber, AgreementTypeID, Principal, PartExchange, CashDeposit, UpFrontPayments, UpFrontPaymentAmount, BalloonOrResidual, InterestRateUplift, NetInstalment, Interest, AccruedInterest, APR, TotalArrears, Balance, PaymentMethod, CRAArrearsStatus, ACQUISProductCode, Term, InterestOnlyTerm, DueDay, CollectionType, PaymentFrequency, CustomProfile, AgreementDate, FirstPaymentDate, UpfrontPaymentDate, ExternalReference1, ExternalReference2, Purpose, Notes, WarningFlag, TeamStatus, Collector, PersonNumber, WarningText, SalesmanNumber, DealerNumber, SalesAuthority, Branch, Customers, PaymentProfile, Transactions, Goods, CollectionsHistory, CRAFlags, TeamStatusId, ArrearsNET, ArrearsVAT, ArrearsFeeNET, ArrearsFeeVAT, ArrearsIns, ChargesOutstanding, LockedTransactions, AdjustedFinalPayment, BankAccountName, BankSortCode, BankAccountNumber, BankIBAN, BankBIC.
+AgreementNumber, AgreementTypeID, Principal, PartExchange, CashDeposit, UpFrontPayments, UpFrontPaymentAmount, BalloonOrResidual, InterestRateUplift, NetInstalment, Interest, AccruedInterest, APR, TotalArrears, Balance, PaymentMethod, CRAArrearsStatus, ACQUISProductCode, Term, InterestOnlyTerm, DueDay, CollectionType, PaymentFrequency, CustomProfile, AgreementDate, FirstPaymentDate, UpfrontPaymentDate, ExternalReference1, ExternalReference2, Purpose, Notes, WarningFlag, TeamStatus, Collector, PersonNumber, WarningText, SalesmanNumber, DealerNumber, SalesAuthority, Branch, PaymentProfile, Transactions, Goods, CollectionsHistory, CRAFlags, TeamStatusId, ArrearsNET, ArrearsVAT, ArrearsFeeNET, ArrearsFeeVAT, ArrearsIns, ChargesOutstanding, LockedTransactions, AdjustedFinalPayment.
 
 RULES:
 1. By DEFAULT (if the user just says "check agreement" or "check arrears"), show ONLY these key fields: AgreementNumber, TotalArrears, Balance, PaymentMethod, CRAArrearsStatus, NetInstalment, DueDay.
 2. If the user asks for SPECIFIC fields (e.g. "what's the payment frequency", "show me the transactions", "what's the APR"), show ONLY those fields.
-3. If the user asks for "full details" or "everything", show all available fields.
+3. If the user asks for "full details" or "everything", show all available fields EXCEPT the ones listed in rule 7.
 4. If TotalArrears is 0 or empty, say "No arrears".
 5. Format amounts as £X.XX. If the agreement is not found or the response contains an error, say so clearly.
-6. Keep the response concise and factual — no caveats.`;
+6. Keep the response concise and factual — no caveats.
+7. NEVER include customer name, date of birth, bank account name, bank sort code, bank account number, IBAN, or BIC in your response — these are redacted for data protection.`;
           const reply = await askClaude(prompt);
           await say({ text: reply, mrkdwn: true });
         } catch (err) {
