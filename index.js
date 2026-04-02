@@ -157,7 +157,17 @@ const approvalNotifiedThreads = new Map(); // thread_ts → ISO date string when
 // ---------------------------------------------------------------------------
 
 const BILL_LING_SYSTEM_PROMPT = `# Bill Ling – AI Direct Report for Hargo (Raylo Ops & Billing) Your name is **Bill Ling**. You are an AI direct report working for Hargo, who leads billing, collections, and regulatory compliance operations at Raylo – a consumer device leasing and finance company. Your role is to operate as a proactive, organised, and operationally sharp team member who reduces Hargo's cognitive load, tracks what matters, and surfaces the right information at the right time. --- ## Your Identity & Tone - Your name is Bill Ling. You can refer to yourself as Bill if it comes up naturally - You are a capable, self-directed direct report – not a generic assistant - Be concise, clear, and direct. No waffle - Use plain English. No em dashes in any response - You know the business context deeply and do not need things over-explained - When you flag something, explain *why* it matters and what the recommended action is - You proactively surface risks, blockers, and outstanding items rather than waiting to be asked - You are an AI that exists only within Slack and connected systems (BigQuery, Make.com, Gmail). You cannot physically attend meetings, visit offices, or do anything in the physical world. If someone says "come to my office" or uses a physical metaphor as a reprimand, acknowledge the criticism and apologise for the mistake -- do not play along as though you can literally do the physical action --- ## How You Learn Hargo will continuously share process documentation with you – both historical and current. This is how you build and deepen your operational knowledge of Raylo's billing, collections, and compliance processes. When Hargo shares a document, process note, SOP, or any other reference material: 1. **Read it fully and confirm receipt** – briefly summarise what you have taken in, in 2-3 sentences, so Hargo knows you have processed it correctly 2. **Flag any conflicts** – if the new document contradicts something you already know, flag it clearly and ask Hargo which version is current 3. **Update your understanding** – treat the most recently shared version of any process as the source of truth, unless Hargo tells you otherwise 4. **Tag it by domain** – file it against the relevant area (e.g. billing, GoCardless, DCA, Aryza Lend, hire agreements, Forest) so you can reference it accurately later Over time, you should become increasingly confident and self-sufficient when handling queries related to documented processes. The goal is that Hargo rarely has to explain the same thing twice. When asked to review, summarise, or learn from a specific thread or conversation, you must ONLY reference what is explicitly present in the thread context provided to you. Never pull in lessons from other conversations, your broader memory, or your training. If you cannot evidence a learning directly from the thread content, do not include it. --- ## Confidence and Uncertainty You operate with **calibrated confidence**: be direct and decisive when you know something, and honest and specific when you do not. ### When you are confident: - State your answer or recommendation clearly, without hedging unnecessarily - Reference the relevant process or document if it backs up your response - Act on known information without asking for permission to proceed ### When you are unsure: - Say so immediately and specifically – do not guess or pad your response - Tell Hargo exactly what you are uncertain about - Ask one clear, focused question to resolve the uncertainty – not multiple questions at once - If you can still take partial action while waiting for clarification, do so and flag what is blocked ### Never: - Pretend to know something you do not - Give a vague or hedged answer when a direct one is possible - Ask unnecessary clarifying questions when the answer is already clear from context --- ## Raylo Platform and System Architecture **Aryza Lend** (formerly known as Anchor) is Raylo's loan management platform. **Forest** is Raylo's core internal platform. **GoCardless** is Raylo's payment provider for BACS transactions. **Stripe** is used for self-serve customer payments. --- ## Daily Slack Channel Monitoring Every day at 1pm, summarise ALL of the following channels: - #data-billing-alerts (C0736RQNV8Q) - heightened attention, flag unacknowledged alerts - #data-billing-updates (C080R5FNFDJ) - billing ops updates - #team-ops-strategy-only (C03LPRS5Z5F) - strategic decisions - #cross-functional-collections (C04V5PMLKJP) - collections coordination - #collab-hire-agreement-audit-updates (C063J5VPPRB) - hire agreement audit For each channel produce: 1. Key updates (bullet points) 2. Outstanding items 3. Action required from Hargo Then a cross-channel summary: top 3-5 things Hargo needs to act on today. Send this as a DM to Hargo (U01DMHVF8KG). --- ## What Good Looks Like - Summaries scannable in under 60 seconds - Clearly distinguish FYI vs needs a decision vs urgent action required - Never leave Hargo guessing about what is outstanding
-- NEVER use Slack's /remind command or suggest using it. You have your own built-in reminder system. Only use Slack's /remind if the user explicitly says "use slack remind" or "use /remind".`;
+- NEVER use Slack's /remind command or suggest using it. You have your own built-in reminder system. Only use Slack's /remind if the user explicitly says "use slack remind" or "use /remind".
+
+--- ## Your Scheduled Tasks (automated, always running)
+You have the following cron jobs that run automatically:
+- 08:00 Mon-Fri: Refund summary + thread chasers to #customer-refunds-and-complaints
+- 09:00 Mon-Fri: BACS batch forecast to #data-billing-updates
+- 09:00-17:00 hourly Mon-Fri: Refund approval monitor (checks for approvals in #customer-refunds-and-complaints, verifies refund posted via Anchor API, confirms or chases)
+- 15:00 Mon-Fri: BACS batch file summary to #data-billing-updates
+- 08:00 Tue-Fri / 10:30 Mon: ARUDD bounce report to #data-billing-updates
+- Every minute: check and fire pending reminders
+You ALWAYS know about these. If someone asks about your schedule or what you monitor, reference this list.`;
 
 // Load knowledge at startup into liveKnowledge
 reloadKnowledge();
@@ -327,6 +337,30 @@ const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 const bigquery = new BigQuery();
 
 // ---------------------------------------------------------------------------
+// Billington's scheduled tasks (deterministic — no LLM needed)
+// ---------------------------------------------------------------------------
+
+function buildTasksList() {
+  return `*My scheduled tasks (all times UK/London):*
+
+*Daily (Mon-Fri):*
+\u2022 *08:00* — Refund summary + thread chasers \u2192 #customer-refunds-and-complaints
+\u2022 *09:00* — BACS batch forecast for the next due date \u2192 #data-billing-updates
+\u2022 *09:00-17:00 (hourly)* — Refund approval monitor \u2014 checks #customer-refunds-and-complaints for approvals, verifies refund posted in Anchor API, confirms or chases
+\u2022 *15:00* — BACS batch file summary (all files generated today) \u2192 #data-billing-updates
+
+*ARUDD bounce report:*
+\u2022 *08:00 Tue-Fri* — ARUDD report \u2192 #data-billing-updates
+\u2022 *10:30 Mon* — ARUDD report (later on Mondays for weekend data)
+
+*Continuous:*
+\u2022 Every minute — check and fire pending reminders
+
+*On startup:*
+\u2022 Run approval monitor immediately`;
+}
+
+// ---------------------------------------------------------------------------
 // Anthropic helpers
 // ---------------------------------------------------------------------------
 
@@ -467,8 +501,9 @@ Billington has access to:
 - summary: A summary of monitored Slack channels ONLY (billing alerts, billing updates, ops strategy, collections, hire agreement audit). NEVER use for BACS-related requests — if the message mentions BACS, use bacs_files instead.
 - channel: a specific named Slack channel the user wants read.
 - refunds: Use when the user wants a status check, drill-down, or action on items in the #customer-refunds-and-complaints channel — e.g. "which refunds are pending?", "any unconfirmed refunds?", "check the refunds channel", "show me outstanding refund requests", "post a refunds update", "mark those as paid", "all refund files have been paid", "confirm this batch was paid yesterday", "update the threads as paid". Also use when someone confirms that refund files have been paid/processed by Barclays. Do NOT use for factual data questions about refunds like "what is the highest refund amount", "how many refunds have we processed" — those are "general".
+- tasks: Use when the user is asking about Billington's own scheduled tasks, routine, schedule, or automated checks — e.g. "what are your scheduled tasks?", "what do you do?", "your routine", "when do you check the refund channel?", "when is your next update?", "what are you monitoring?", "list your tasks", "your schedule". Do NOT use for user reminders (remind me / cancel reminder) — those are "reminder".
 - instruction: the user is telling Billington to remember, learn, or update its behaviour.
-- reminder: the user is asking Billington to set a reminder, cancel a reminder, or list reminders — e.g. "remind me to check BACS at 3pm", "remind Thomas to pick up the residuals issue on Monday", "cancel reminder #3", "what reminders do I have", "set a reminder for 10am tomorrow".
+- reminder: the user is asking Billington to set a reminder, cancel a reminder, or list their OWN reminders — e.g. "remind me to check BACS at 3pm", "remind Thomas to pick up the residuals issue on Monday", "cancel reminder #3", "what reminders do I have", "set a reminder for 10am tomorrow". Do NOT use for questions about Billington's own scheduled tasks — those are "tasks".
 - general: anything else — general questions, conversation, advice, OR statements/comments where Billington has been copied in but is not being directly asked to do anything (e.g. "think there was a data issue last night", "just so you know X happened").
 
 IMPORTANT RULES:
@@ -479,7 +514,7 @@ IMPORTANT RULES:
 
 Message: "${text.replace(/"/g, "'")}"
 
-Reply with ONLY one word from this list (make, arudd, bacs_files, bacs, email, summary, channel, refunds, agreement, instruction, reminder, general), OR if genuinely ambiguous reply with CLARIFY: followed by a short clarifying question.`;
+Reply with ONLY one word from this list (make, arudd, bacs_files, bacs, email, summary, channel, refunds, agreement, tasks, instruction, reminder, general), OR if genuinely ambiguous reply with CLARIFY: followed by a short clarifying question.`;
 
   try {
     const result = await anthropic.messages.create({
@@ -490,7 +525,7 @@ Reply with ONLY one word from this list (make, arudd, bacs_files, bacs, email, s
     const raw = result.content[0]?.text?.trim() || "";
     if (raw.toUpperCase().startsWith("CLARIFY:")) return raw; // pass through as-is
     const intent = raw.toLowerCase();
-    const valid = ["make", "arudd", "bacs_files", "bacs", "email", "summary", "channel", "refunds", "agreement", "instruction", "reminder", "general"];
+    const valid = ["make", "arudd", "bacs_files", "bacs", "email", "summary", "channel", "refunds", "agreement", "tasks", "instruction", "reminder", "general"];
     return valid.includes(intent) ? intent : "general";
   } catch {
     return "general";
@@ -2900,7 +2935,7 @@ cron.schedule(
 console.log("[bill-ling] BACS file summary cron scheduled for 15:00 Mon-Fri (Europe/London).");
 
 // ---------------------------------------------------------------------------
-// Cron: 4pm Mon-Fri — Refunds summary + thread chasers
+// Cron: 8am Mon-Fri — Refunds summary + thread chasers
 cron.schedule(
   "0 8 * * 1-5",
   async () => {
@@ -2923,7 +2958,7 @@ cron.schedule(
   },
   { timezone: "Europe/London" }
 );
-console.log("[bill-ling] Refunds cron scheduled for 16:00 Mon-Fri (Europe/London).");
+console.log("[bill-ling] Refunds cron scheduled for 08:00 Mon-Fri (Europe/London).");
 
 // Cron: Hourly approval monitor — check if Stephen approved refunds/GOGW
 cron.schedule(
@@ -3214,8 +3249,10 @@ app.event("app_mention", async ({ event, say }) => {
       const refundsKeywordOverride = /\b(refund|barclays)\b/i.test(cleanText) && /\b(which|what|show|list|detail|specific|explicit|outstanding|pending|awaiting|confirm|file|status)\b/i.test(cleanText);
       const isRefundThread = contextMessages && /Refunds update/i.test(contextMessages);
       const refundsOverride = refundsKeywordOverride || isRefundThread;
-      const intent = specificChannelId ? "channel" : aruddOverride ? "arudd" : refundsOverride ? "refunds" : await classifyIntent(intentInput);
-      console.log(`[bill-ling] Intent (mention): "${intent}"${aruddOverride ? " [arudd-override]" : ""}${refundsOverride ? " [refunds-override]" : ""} — "${cleanText}"`);
+      // Force tasks intent for questions about Billington's own schedule/routine
+      const tasksOverride = /\b(scheduled tasks?|your (schedule|routine|tasks?|crons?|jobs?)|what do you do|what are you (monitoring|checking|doing)|next.{0,10}(check|run|update|post)|when do you (run|check|post|monitor)|when is.{0,15}(next|scheduled)|do you check.{0,15}(every|hour)|don.?t you check)\b/i.test(cleanText);
+      const intent = specificChannelId ? "channel" : aruddOverride ? "arudd" : tasksOverride ? "tasks" : refundsOverride ? "refunds" : await classifyIntent(intentInput);
+      console.log(`[bill-ling] Intent (mention): "${intent}"${aruddOverride ? " [arudd-override]" : ""}${tasksOverride ? " [tasks-override]" : ""}${refundsOverride ? " [refunds-override]" : ""} — "${cleanText}"`);
 
       if (typeof intent === "string" && intent.toUpperCase().startsWith("CLARIFY:")) {
         reply = intent.replace(/^CLARIFY:\s*/i, "").trim();
@@ -3845,6 +3882,8 @@ RULES:
             reply = `Got it. I'll remind ${targetStr} about "${parsed.what}" at ${fireTime}. (Reminder #${reminder.id})`;
           }
         }
+      } else if (intent === "tasks") {
+        reply = buildTasksList();
       } else {
         const messageWithContext = `[Message from: ${senderName}]\n${contextMessages
           ? `${cleanText}\n\n${contextMessages}`
