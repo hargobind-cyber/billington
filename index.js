@@ -1722,6 +1722,7 @@ const APPROVER_NAMES = {
 };
 
 // Use LLM to classify whether a reply from an approver is giving the green light
+// Returns: { type: "APPROVED" | "CONDITIONAL" | "NO", condition?: string }
 async function classifyApproval(parentText, replyText, replyAuthor) {
   const prompt = `You are classifying a message in a refund/complaints Slack channel.
 
@@ -1731,12 +1732,60 @@ The original request:
 A reply from ${replyAuthor}:
 "${(replyText || "").slice(0, 500)}"
 
-Is this reply an UNCONDITIONAL APPROVAL to go ahead and process the refund/payment/GOGW right now?
+Classify this reply as one of:
+APPROVED — unconditional approval to process the refund/payment/GOGW right now.
+CONDITIONAL — approval is given BUT with a condition that must be met first.
+NO — not an approval at all (a question, request for info, general comment, etc.).
 
-YES examples: "approved", "go ahead", "yes process it", "happy with that", "we should go ahead with the payments", "Approved @Julia".
-NO examples: "Approved if arrears are cleared", "Approved once the device is received", "Go ahead when the customer pays", "Check the status first", "What is the trade in status?", any question, any request for information.
+APPROVED examples: "approved", "go ahead", "yes process it", "happy with that", "we should go ahead with the payments", "Approved @Julia".
+CONDITIONAL examples: "Approved if arrears are cleared", "Approved once the device is received", "Go ahead when the customer pays", "Yes but only after the account is up to date", "Happy to approve subject to the customer confirming".
+NO examples: "Check the status first", "What is the trade in status?", any question without approval, any request for information.
 
-CRITICAL: If the approval has ANY condition attached ("if", "once", "when", "after", "provided", "as long as", "subject to"), it is NOT an approval — reply NO. A conditional approval means the condition must be verified first before processing.
+Reply format:
+- If APPROVED: reply with just "APPROVED"
+- If CONDITIONAL: reply with "CONDITIONAL: " followed by a brief description of the condition (max 20 words)
+- If NO: reply with just "NO"`;
+
+  try {
+    const result = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 50,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const raw = (result.content[0]?.text || "").trim();
+    if (raw.toUpperCase().startsWith("APPROVED")) return { type: "APPROVED" };
+    if (raw.toUpperCase().startsWith("CONDITIONAL")) {
+      const condition = raw.replace(/^CONDITIONAL:\s*/i, "").trim();
+      return { type: "CONDITIONAL", condition: condition || "condition not specified" };
+    }
+    return { type: "NO" };
+  } catch (err) {
+    console.error("[bill-ling] Approval classification error:", err.message);
+    return { type: "NO" };
+  }
+}
+
+// Use LLM to check if a thread's subsequent discussion indicates a conditional approval's
+// condition has been met (or an alternative agreed condition has been met)
+async function classifyConditionMet(parentText, conditionText, threadContext) {
+  const prompt = `You are monitoring a refund/complaints thread in Slack.
+
+Original request:
+"${(parentText || "").slice(0, 300)}"
+
+An approver gave CONDITIONAL approval with this condition:
+"${(conditionText || "").slice(0, 200)}"
+
+Here is what happened in the thread AFTER the conditional approval:
+${(threadContext || "").slice(0, 2000)}
+
+Has the condition been met, OR has an alternative condition been agreed and confirmed?
+
+Important: conditions can evolve through discussion. If the team agreed to change the condition (e.g. from "arrears cleared" to "customer confirms they're happy") and someone has now confirmed the new condition is met, that counts as YES.
+
+A simple "I'm happy with that" or "confirmed" or "good to go" from a team member discussing the condition counts as the condition being met.
+
+Questions, updates without confirmation, or "we're checking" do NOT count — the condition is still pending.
 
 Reply with ONLY "YES" or "NO".`;
 
@@ -1748,7 +1797,7 @@ Reply with ONLY "YES" or "NO".`;
     });
     return (result.content[0]?.text || "").trim().toUpperCase() === "YES";
   } catch (err) {
-    console.error("[bill-ling] Approval classification error:", err.message);
+    console.error("[bill-ling] Condition-met classification error:", err.message);
     return false;
   }
 }
@@ -1798,20 +1847,59 @@ async function checkRefundApprovals() {
       continue;
     }
 
+    // 30-day timeout: if the latest reply in the thread is > 30 days old, stop checking
+    const latestReplyTs = replies.length > 0 ? Math.max(...replies.map(r => Number(r.ts))) : Number(msg.ts);
+    const daysSinceLastReply = (Date.now() / 1000 - latestReplyTs) / 86400;
+    if (daysSinceLastReply > 30) {
+      console.log(`[bill-ling] Approval monitor: skipping thread ${msg.ts} — no activity for ${Math.floor(daysSinceLastReply)} days (>30 day timeout)`);
+      continue;
+    }
+
     // Check if any approved user posted an approval (LLM-based classification)
     let approvalReply = null;
+    let approvalResult = null;
     const approverReplies = replies.filter(r => REFUND_APPROVERS.has(r.user));
     console.log(`[bill-ling] Approval monitor: thread ${msg.ts} has ${replies.length} replies, ${approverReplies.length} from approvers`);
     for (const r of approverReplies) {
       const approverName = APPROVER_NAMES[r.user] || "Unknown";
       console.log(`[bill-ling] Approval monitor: classifying reply from ${approverName}: "${(r.text || "").slice(0, 60)}"`);
-      const isApproval = await classifyApproval(msg.text, r.text, approverName);
-      console.log(`[bill-ling] Approval monitor: classification result = ${isApproval}`);
-      if (isApproval) {
+      const result = await classifyApproval(msg.text, r.text, approverName);
+      console.log(`[bill-ling] Approval monitor: classification result = ${result.type}${result.condition ? ` (${result.condition})` : ""}`);
+      if (result.type === "APPROVED") {
         approvalReply = r;
+        approvalResult = result;
         break;
       }
+      if (result.type === "CONDITIONAL" && !approvalResult) {
+        approvalReply = r;
+        approvalResult = result;
+        // Don't break — keep checking for a later unconditional approval
+      }
     }
+
+    // Handle CONDITIONAL approvals — check if the condition has since been met
+    if (approvalResult && approvalResult.type === "CONDITIONAL") {
+      const approvalTs = Number(approvalReply.ts);
+      const repliesAfterApproval = replies.filter(r => Number(r.ts) > approvalTs && !r.bot_id && r.user !== BOT_USER_ID);
+      if (repliesAfterApproval.length === 0) {
+        console.log(`[bill-ling] Approval monitor: conditional approval in thread ${msg.ts} — no subsequent replies yet, skipping`);
+        continue;
+      }
+      // Build thread context from replies after the conditional approval
+      const threadContext = repliesAfterApproval.map(r => {
+        const name = APPROVER_NAMES[r.user] || r.user;
+        return `${name}: ${(r.text || "").slice(0, 300)}`;
+      }).join("\n");
+      const conditionMet = await classifyConditionMet(msg.text, approvalResult.condition, threadContext);
+      console.log(`[bill-ling] Approval monitor: condition "${approvalResult.condition}" met = ${conditionMet}`);
+      if (!conditionMet) {
+        console.log(`[bill-ling] Approval monitor: conditional approval in thread ${msg.ts} — condition not yet met, skipping`);
+        continue;
+      }
+      // Condition met — treat as approved from here on
+      console.log(`[bill-ling] Approval monitor: conditional approval in thread ${msg.ts} — condition met, proceeding as approved`);
+    }
+
     if (!approvalReply) {
       console.log(`[bill-ling] Approval monitor: no approval found in thread ${msg.ts}`);
       continue;
