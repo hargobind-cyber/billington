@@ -1802,6 +1802,52 @@ Reply with ONLY "YES" or "NO".`;
   }
 }
 
+// Use LLM to check if a human reply in the thread is confirming they have PROCESSED
+// the refund (e.g. "done", "refund sent", "payment posted"). Must distinguish from
+// unrelated uses of similar words (e.g. "it was sent to 3PP" = not about the refund).
+async function classifyProcessingConfirmation(parentText, replyText, replyAuthor) {
+  const prompt = `You are monitoring a refund/complaints thread in Slack.
+
+Original request (the parent message):
+"${(parentText || "").slice(0, 300)}"
+
+A team member (${replyAuthor}) replied:
+"${(replyText || "").slice(0, 300)}"
+
+Is this reply confirming that the REFUND has been PROCESSED / SENT / COMPLETED / PAID?
+
+Examples of YES:
+- "Done" (in response to a request to process a refund)
+- "Refund sent"
+- "Payment posted"
+- "Processed"
+- "Refund has been actioned"
+- "Transferred"
+
+Examples of NO:
+- "it was sent to 3PP" (talking about a package, not the refund)
+- "the customer sent an email" (not about processing the refund)
+- "I've done the investigation" (done refers to investigation, not refund processing)
+- "Has this been processed?" (this is a question, not confirmation)
+- "We need to check if it's been paid" (not confirming, asking)
+- Any question (contains "?")
+- General discussion about the case
+
+Reply with ONLY "YES" or "NO".`;
+
+  try {
+    const result = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 5,
+      messages: [{ role: "user", content: prompt }],
+    });
+    return (result.content[0]?.text || "").trim().toUpperCase() === "YES";
+  } catch (err) {
+    console.error("[bill-ling] Processing confirmation classification error:", err.message);
+    return false;
+  }
+}
+
 async function checkRefundApprovals() {
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
   const oldest = String(Math.floor(Date.now() / 1000) - 30 * 86400); // last 30 days
@@ -1905,16 +1951,26 @@ async function checkRefundApprovals() {
       continue;
     }
 
-    // Skip if a human confirmed processing (done/paid/sent) — but not if it's a question
-    const humanProcessingConfirm = replies.some((r) => {
+    // Skip if a human confirmed they've already PROCESSED the refund (LLM-based check)
+    // Only check non-bot human replies that contain potential processing keywords
+    let humanProcessingConfirm = false;
+    const potentialProcessingReplies = replies.filter((r) => {
       if (r.user === BOT_USER_ID || r.bot_id) return false;
       const txt = (r.text || "").trim();
-      // Ignore questions — they contain "?" or start with interrogative words
       if (txt.includes("?") || /^(has|have|did|was|were|is|can|could|will|when|check)\b/i.test(txt)) return false;
       return textContainsAny(txt, PROCESSING_KEYWORDS);
     });
+    for (const r of potentialProcessingReplies) {
+      const authorName = APPROVER_NAMES[r.user] || r.user;
+      const isConfirm = await classifyProcessingConfirmation(msg.text, r.text, authorName);
+      console.log(`[bill-ling] Approval monitor: processing check — "${(r.text || "").slice(0, 60)}" from ${authorName} → ${isConfirm ? "YES (processed)" : "NO (not about refund processing)"}`);
+      if (isConfirm) {
+        humanProcessingConfirm = true;
+        break;
+      }
+    }
     if (humanProcessingConfirm) {
-      console.log(`[bill-ling] Approval monitor: thread ${msg.ts} has human processing confirmation — skipping`);
+      console.log(`[bill-ling] Approval monitor: thread ${msg.ts} has confirmed human processing — skipping`);
       continue;
     }
 
